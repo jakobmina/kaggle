@@ -3,19 +3,19 @@
   {
    "cell_type": "code",
    "execution_count": 1,
-   "id": "b3482197",
+   "id": "d3950d7d",
    "metadata": {
     "execution": {
-     "iopub.execute_input": "2026-03-25T17:09:57.180740Z",
-     "iopub.status.busy": "2026-03-25T17:09:57.177613Z",
-     "iopub.status.idle": "2026-03-25T17:09:58.156829Z",
-     "shell.execute_reply": "2026-03-25T17:09:58.154182Z"
+     "iopub.execute_input": "2026-03-25T17:22:15.490317Z",
+     "iopub.status.busy": "2026-03-25T17:22:15.488069Z",
+     "iopub.status.idle": "2026-03-25T17:22:16.630315Z",
+     "shell.execute_reply": "2026-03-25T17:22:16.627131Z"
     },
     "papermill": {
-     "duration": 0.987937,
-     "end_time": "2026-03-25T17:09:58.159465",
+     "duration": 1.151354,
+     "end_time": "2026-03-25T17:22:16.633206",
      "exception": false,
-     "start_time": "2026-03-25T17:09:57.171528",
+     "start_time": "2026-03-25T17:22:15.481852",
      "status": "completed"
     },
     "tags": []
@@ -346,13 +346,13 @@
   },
   {
    "cell_type": "markdown",
-   "id": "2f4b64f0",
+   "id": "e9508b2a",
    "metadata": {
     "papermill": {
-     "duration": 0.002652,
-     "end_time": "2026-03-25T17:09:58.164979",
+     "duration": 0.002639,
+     "end_time": "2026-03-25T17:22:16.638667",
      "exception": false,
-     "start_time": "2026-03-25T17:09:58.162327",
+     "start_time": "2026-03-25T17:22:16.636028",
      "status": "completed"
     },
     "tags": []
@@ -696,19 +696,19 @@
   {
    "cell_type": "code",
    "execution_count": 2,
-   "id": "3763b46b",
+   "id": "6887a03c",
    "metadata": {
     "execution": {
-     "iopub.execute_input": "2026-03-25T17:09:58.207199Z",
-     "iopub.status.busy": "2026-03-25T17:09:58.172841Z",
-     "iopub.status.idle": "2026-03-25T17:09:59.145955Z",
-     "shell.execute_reply": "2026-03-25T17:09:59.143260Z"
+     "iopub.execute_input": "2026-03-25T17:22:16.679671Z",
+     "iopub.status.busy": "2026-03-25T17:22:16.646820Z",
+     "iopub.status.idle": "2026-03-25T17:22:17.682889Z",
+     "shell.execute_reply": "2026-03-25T17:22:17.680210Z"
     },
     "papermill": {
-     "duration": 0.981021,
-     "end_time": "2026-03-25T17:09:59.148758",
+     "duration": 1.044544,
+     "end_time": "2026-03-25T17:22:17.685831",
      "exception": false,
-     "start_time": "2026-03-25T17:09:58.167737",
+     "start_time": "2026-03-25T17:22:16.641287",
      "status": "completed"
     },
     "tags": []
@@ -732,7 +732,7 @@
       "\n",
       "[SUCCESS] File generated at: /kaggle/working/submission.csv\n",
       "\n",
-      "── Evaluacion interna (Resultados Reales) ──────────────────\n",
+      "── Internal evaluation (Real Output) ──────────────────\n",
       "  learning             MAE          : 0.000000\n",
       "  metacognition        MAE dev      : 0.000000\n",
       "  attention            Cosine Sim   : 1.0000\n",
@@ -743,7 +743,7 @@
    ],
    "source": [
     "# ==============================================================================\n",
-    "# H7 AGI Benchmark — Predictor (R) - VERSIÓN FINAL\n",
+    "# H7 AGI Benchmark — Predictor (R) - Ultimate\n",
     "# ==============================================================================\n",
     "\n",
     "setwd(\"/kaggle/input/datasets/jakomina/database\")\n",
@@ -771,7 +771,7 @@
     "MAX_EXPAND <- 10    \n",
     "\n",
     "# ── Funciones de Apoyo (Matemáticas y Parsers) ────────────────────────────────\n",
-    "\n",
+    "# Support Functions: Mathematical Core and Parsers\n",
     "std_scale <- function(X_train, X_test) {\n",
     "  mu  <- colMeans(X_train)\n",
     "  sd  <- apply(X_train, 2, sd) + 1e-9\n",
@@ -844,7 +844,7 @@
     "  names(tab)[which.max(tab)]\n",
     "}\n",
     "\n",
-    "# ── Predictor de Tracks ───────────────────────────────────────────────────────\n",
+    "# ── Predict Track ───────────────────────────────────────────────────────\n",
     "\n",
     "predict_track <- function(track, train, test) {\n",
     "  feats  <- TRACK_FEATURES[[track]]\n",
@@ -889,11 +889,11 @@
     "}\n",
     "\n",
     "# ── Función de Evaluación (submission) ─────────────────────────────────────────\n",
-    "\n",
+    "# Evaluation Function (Submission & Metrics)\n",
     "evaluate <- function(submission) {\n",
     "  ans_path <- \"/kaggle/input/notebooks/jakomina/attention-ipynb/submission\"\n",
     "  if (!file.exists(ans_path)) {\n",
-    "    cat(\"  [!] Error: No se encontró el archivo de respuestas.\\n\")\n",
+    "    cat(\"  [!] Error: Please ensure the output directory contains the required response file.\\n\")\n",
     "    return(invisible(NULL))\n",
     "  }\n",
     "  \n",
@@ -905,7 +905,7 @@
     "  m <- merge(answers, submission, by = \"id\", suffixes = c(\"_true\", \"_pred\"))\n",
     "  m <- merge(m, test_meta[, c(\"id\", \"track\")], by = \"id\")\n",
     "\n",
-    "  cat(\"\\n── Evaluacion interna (Resultados Reales) ──────────────────\\n\")\n",
+    "  cat(\"\\n── Internal evaluation (Real Output) ──────────────────\\n\")\n",
     "\n",
     "  for (tr in names(TRACK_FEATURES)) {\n",
     "    sub <- m[m$track == tr, ]\n",
@@ -1014,14 +1014,14 @@
   },
   "papermill": {
    "default_parameters": {},
-   "duration": 5.309265,
-   "end_time": "2026-03-25T17:09:59.274175",
+   "duration": 6.00737,
+   "end_time": "2026-03-25T17:22:17.812187",
    "environment_variables": {},
    "exception": null,
    "input_path": "__notebook__.ipynb",
    "output_path": "__notebook__.ipynb",
    "parameters": {},
-   "start_time": "2026-03-25T17:09:53.964910",
+   "start_time": "2026-03-25T17:22:11.804817",
    "version": "2.6.0"
   }
  },
