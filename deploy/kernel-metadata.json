@@ -1,0 +1,14 @@
+{
+  "id": "jakomina/double-distance-ipynb",
+  "title": "H7 Attention Benchmark Pipeline",
+  "code_file": "double-distance.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [],
+  "competition_sources": ["kaggle-measuring-agi"],
+  "kernel_sources": []
+}
