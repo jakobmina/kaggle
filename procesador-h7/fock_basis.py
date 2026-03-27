@@ -291,4 +291,4 @@ if __name__ == "__main__":
     gs = fock_ground_state(fock)
     print(f"\nGround state |0,0,0⟩:")
     print(f"  Norm: {np.linalg.norm(gs.vec):.6f}")
-print(f"  Number operator expectation: {gs.expectation_value(fock.total_number_operator()):.6f}")
+    print(f"  Number operator expectation: {gs.expectation_value(fock.total_number_operator()):.6f}")
