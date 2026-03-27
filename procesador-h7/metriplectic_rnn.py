@@ -1,13 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
-from torch.nn.utils.rnn import pad_sequence
 import numpy as np
 import matplotlib.pyplot as plt
-import os
 import math
-from typing import List, Tuple, Optional
+import os
 import logging
 from tqdm import tqdm
 
@@ -15,14 +14,73 @@ from tqdm import tqdm
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- H7 Constantes ---
+# --- H7 Constantes Teóricas ---
 PHI = (1 + math.sqrt(5)) / 2
 PSI_1 = abs(math.cos(math.pi * PHI))
-DRIFT_072 = 7 - 2 * math.pi  # ~ 0.7168
-# Pesos propuestos (71 - 28 - 1)
-W_SYMP = DRIFT_072       # ~ 0.7168 Conservación/Inercia (Base)
-W_METR = 1.0 - DRIFT_072 - 0.01 # ~ 0.2732 Disipación/Entropía
-W_VAC  = 0.01            # Término de vacío / Residuos
+DRIFT_072 = 7 - 2 * math.pi      # ~ 0.7168
+EPSILON = PSI_1 / 2              # ~ 0.1812 (Threshold del vacío)
+
+# Pesos Metriplécticos Reales (71.7 - 28.3 - 1)
+W_SYMP = DRIFT_072               # Conservación/Inercia (Base)
+W_METR = 1.0 - DRIFT_072 - 0.01  # Disipación/Entropía
+W_VAC  = 0.01
+
+# --- Generador de Datos Holográficos Z_7 ---
+def generate_basis(N=128, delta=1.0):
+    B_obj = np.zeros((7, N))
+    B_ref = np.zeros((7, N))
+    for d in range(7):
+        phi_d = PHI ** (d + 1)
+        for n in range(N):
+            n_val = n + 1
+            B_obj[d, n] = math.cos(math.pi * phi_d * n_val + delta)
+            B_ref[d, n] = math.cos(math.pi * phi_d * n_val - delta)
+    return B_obj, B_ref
+
+def ternary_collapse(H: np.ndarray, thresh: float) -> np.ndarray:
+    T = np.zeros_like(H)
+    T[H > thresh] = 1
+    T[H < -thresh] = -1
+    return T
+
+class HolographicDataset(Dataset):
+    """
+    Dataset para el "H7 Attention Benchmark".
+    Reconstrucción 128 -> 7 a partir de Epsilon Vacuum.
+    """
+    def __init__(self, num_samples: int = 1000):
+        self.num_samples = num_samples
+        self.B_obj, self.B_ref = generate_basis(128, delta=math.pi/4)
+        
+        self.T_data = []
+        self.X_hat_data = []
+        
+        logger.info(f"Generando {num_samples} firmas cuánticas en Z7...")
+        for _ in range(num_samples):
+            # 1. State Original X (dim=7)
+            x = np.random.randn(7)
+            x = x / np.linalg.norm(x)
+            
+            # 2. Proyección Holográfica -> H (dim=128)
+            H = x @ self.B_obj
+            
+            # 3. Colapso Ternario (La Entrada de la Red)
+            T = ternary_collapse(H, EPSILON)
+            
+            # 4. Target de Reconstrucción (Ground Truth Real)
+            X_hat = (H @ self.B_ref.T) / 128.0
+            
+            # Transformamos T (trits: -1, 0, 1) a indices (0, 1, 2)
+            T_idx = T + 1
+            
+            self.T_data.append(torch.tensor(T_idx, dtype=torch.long))
+            self.X_hat_data.append(torch.tensor(X_hat, dtype=torch.float32))
+
+    def __len__(self) -> int:
+        return self.num_samples
+    
+    def __getitem__(self, idx: int):
+        return self.T_data[idx], self.X_hat_data[idx]
 
 class GoldenModulationLayer(nn.Module):
     """
@@ -33,218 +91,149 @@ class GoldenModulationLayer(nn.Module):
         super(GoldenModulationLayer, self).__init__()
         
     def forward(self, x: torch.Tensor, step_n: int) -> torch.Tensor:
-        # Evaluamos el operador áureo de manera escalar para el paso 'n'
         O_n = math.cos(math.pi * step_n) * math.cos(math.pi * PHI * step_n)
-        # Modulamos el tensor 
         return x * O_n
-
-class TernaryDataset(Dataset):
-    """
-    Dataset adaptado a firmas continuas/ternarias del benchmark H7.
-    Convierte trazas de estados biológicos/informacionales [-1, 0, 1] 
-    a índices continuos o categóricos [0, 1, 2] protegidos.
-    """
-    def __init__(self, sequences_h7: List[List[float]], max_length: int = 128, stride: int = 10):
-        self.max_length = max_length
-        self.stride = stride
-        self.sequences = []
-        self._prepare_sequences(sequences_h7)
-        
-    def _prepare_sequences(self, sequences: List[List[float]]) -> None:
-        logger.info("Preparando secuencias ternarias/cuánticas...")
-        for seq in sequences:
-            # Ventanas deslizantes a lo largo del tract cognitivo
-            for i in range(0, len(seq) - 1, self.stride):
-                window = seq[i:i + self.max_length]
-                if len(window) > 1:
-                    self.sequences.append(window)
-        logger.info(f"Creadas {len(self.sequences)} secuencias H7 de entrenamiento")
-    
-    def __len__(self) -> int:
-        return len(self.sequences)
-    
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        seq = self.sequences[idx]
-        # Para secuencias temporales H7: entrada (t), objetivo a predecir (t+1)
-        # +1 para desplazar el ternario cerrado de [-1, 0, 1] a índices [0, 1, 2]
-        input_ids = torch.tensor([s + 1 for s in seq[:-1]], dtype=torch.long)
-        target_ids = torch.tensor([s + 1 for s in seq[1:]], dtype=torch.long)
-        return input_ids, target_ids
-
-def collate_fn(batch: List[Tuple[torch.Tensor, torch.Tensor]]) -> Tuple[torch.Tensor, torch.Tensor]:
-    inputs, targets = zip(*batch)
-    inputs_padded = pad_sequence(inputs, batch_first=True, padding_value=3)
-    targets_padded = pad_sequence(targets, batch_first=True, padding_value=-100)
-    return inputs_padded, targets_padded
 
 class MetriplecticRNN(nn.Module):
     """
-    Procesador Metripléctico Multicapa (RNN Base + Modulación H7).
+    Arquitectura para "The H7 Attention Task".
+    Lee seq de 128 trits -> Reconstruye fase 7D.
     """
-    def __init__(self, vocab_size: int = 4, embed_size: int = 64, hidden_size: int = 128, 
-                 num_layers: int = 2, dropout: float = 0.3):
+    def __init__(self, vocab_size: int = 3, embed_size: int = 16, hidden_size: int = 64, 
+                 out_features: int = 7, num_layers: int = 2):
         super(MetriplecticRNN, self).__init__()
         
-        self.vocab_size = vocab_size
-        self.hidden_size = hidden_size
-        
-        # Proyección de estados discretos a dimensión densa
-        self.embedding = nn.Embedding(vocab_size, embed_size, padding_idx=3)
-        
-        # Memoria/Inercia (Simpléctica equivalente aproximada)
-        self.rnn = nn.LSTM(embed_size, hidden_size, num_layers, 
-                           batch_first=True, dropout=dropout if num_layers > 1 else 0)
-        
-        # Modulación Áurea O_n
+        self.embedding = nn.Embedding(vocab_size, embed_size)
+        self.rnn = nn.LSTM(embed_size, hidden_size, num_layers, batch_first=True)
         self.golden_modulation = GoldenModulationLayer()
-        
-        self.dropout = nn.Dropout(dropout)
         self.layer_norm = nn.LayerNorm(hidden_size)
         
-        # Salida colapsando de nuevo al estado ternario
-        self.fc = nn.Linear(hidden_size, vocab_size)
-        self._init_weights()
+        # Salida: Reconstrucción 7D
+        self.fc = nn.Linear(hidden_size, out_features)
     
-    def _init_weights(self):
-        for name, param in self.named_parameters():
-            if 'weight' in name:
-                nn.init.xavier_uniform_(param) if param.dim() > 1 else nn.init.normal_(param)
-            elif 'bias' in name:
-                nn.init.constant_(param, 0)
-    
-    def forward(self, x: torch.Tensor, step_n: int, hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        x = self.embedding(x)  
-        rnn_out, hidden = self.rnn(x, hidden)
+    def forward(self, x: torch.Tensor, step_n: int):
+        # x shape: (batch, 128)
+        emb = self.embedding(x)  # (batch, 128, embed_size)
         
-        # Inyectando Vacío Estructurado / Modulación H7 al hidden state general
-        modulated_out = self.golden_modulation(rnn_out, step_n)
+        # Aplicamos RNN
+        rnn_out, (h_n, c_n) = self.rnn(emb) 
         
+        # Extraemos el estado final de la secuencia para la predicción
+        final_state = h_n[-1] # (batch, hidden_size)
+        
+        # Modulamos holográficamente
+        modulated_out = self.golden_modulation(final_state, step_n)
         norm_out = self.layer_norm(modulated_out)
-        norm_out = self.dropout(norm_out)
         
-        output = self.fc(norm_out)  
-        return output, hidden
+        # Proyectamos al vector de 7 dimensiones
+        output = self.fc(norm_out)
+        return output
 
 class MetriplecticLoss(nn.Module):
     """
     Función de Pérdida Dual Regida por Constantes H7 (71.7% - 28.3% - 1%)
-    Valida la Regla 1.1 y 1.2 del Mandato Metripléctico.
+    Valida la Regla 1.1 y 1.2, resolviendo la Tarea de Métrica del Coseno.
     """
     def __init__(self, w_symp=W_SYMP, w_metr=W_METR, w_vac=W_VAC):
         super(MetriplecticLoss, self).__init__()
-        self.task_loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
         self.w_symp = w_symp
         self.w_metr = w_metr
         self.w_vac = w_vac
         
-    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> Tuple[torch.Tensor, float, float]:
-        # Tareas: Token Prediction Error
-        L_task = self.task_loss_fn(logits.view(-1, logits.size(-1)), targets.view(-1))
+    def forward(self, pred_7d: torch.Tensor, target_7d: torch.Tensor):
+        # L_task evalúa qué tan mal está el vector resultante respecto al ground truth
+        # CosineSimilarity(x, y) = [-1, 1], donde 1 es perfecto.
+        # Loss debería ser 0 si es perfecto: 1 - Cosine
+        cos_sim = F.cosine_similarity(pred_7d, target_7d, dim=-1)
+        L_task = torch.mean(1.0 - cos_sim)
         
-        # Pérdida Simpléctica (Energía Cinetica equivalente: H = 1/2 psi^2)
-        # Queremos conservar inercia pero sin explotar. Penalizamos magnitudes exabruptas de estado.
-        L_symp = 0.5 * torch.mean(logits ** 2)
+        # Pérdida Simpléctica (Inercia / Energía Cinética)
+        L_symp = 0.5 * torch.mean(pred_7d ** 2)
         
-        # Pérdida Métrica (Disipativa/Relajación)
-        # Simulando la entropía S ln(psi): empuja las distribuciones hacia un equilibrio.
-        # Aproximamos penalizando la varianza general (que no se quede atrapado ni fluctúe a infinito)
-        target_variance = PSI_1  # Relaja hacia la entropía áurea
-        current_variance = torch.var(logits)
+        # Pérdida Métrica (Disipativa hacia la Entropía)
+        target_variance = PSI_1
+        current_variance = torch.var(pred_7d)
         L_metr = torch.abs(current_variance - target_variance)
         
-        # Ecuación Total: L_total = W_vac * L_task + W_symp * L_symp + W_metr * L_metr
-        # Usaremos L_task como el término de vacío 'W_vac' estructural guiado por los datos experimentales
         total_loss = self.w_vac * L_task + self.w_symp * L_symp + self.w_metr * L_metr
-        
-        return total_loss, L_symp.item(), L_metr.item()
+        return total_loss, L_task.item(), L_symp.item(), L_metr.item(), torch.mean(cos_sim).item()
 
 class MetriplecticTrainer:
-    """Clase para manejar el entrenamiento y rastrear diagnósticos H7"""
-    def __init__(self, model: nn.Module, device: str = 'cpu', save_dir: str = './checkpoints'):
+    def __init__(self, model: nn.Module, device: str = 'cpu', save_dir: str = './working'):
         self.model = model
         self.device = device
         self.save_dir = save_dir
         os.makedirs(save_dir, exist_ok=True)
         
-        self.history_symp = []
-        self.history_metr = []
-        self.history_total = []
+        self.h_symp, self.h_metr, self.h_cos = [], [], []
         self.model.to(device)
     
-    def train(self, train_loader: DataLoader, num_epochs: int = 10, lr: float = 0.001):
-        optimizer = optim.AdamW(self.model.parameters(), lr=lr, weight_decay=1e-5)
+    def train(self, train_loader: DataLoader, num_epochs: int = 15, lr: float = 0.005):
+        optimizer = optim.AdamW(self.model.parameters(), lr=lr)
         criterion = MetriplecticLoss()
         
-        logger.info(f"Iniciando Entrenamiento Metripléctico ({num_epochs} Épocas)")
-        
-        global_step = 1 # Step n para el Golden Operator
+        logger.info(f"Entrenamiento Tarea Kaggle 128->7 ({num_epochs} Épocas)")
+        global_step = 1
         
         for epoch in range(num_epochs):
             self.model.train()
-            train_loss, train_symp, train_metr = 0.0, 0.0, 0.0
+            ep_symp, ep_metr, ep_cos = 0.0, 0.0, 0.0
             
-            progress_bar = tqdm(train_loader, desc=f'Época {epoch+1}/{num_epochs}')
-            
-            for inputs, targets in progress_bar:
+            pbar = tqdm(train_loader, desc=f'Época {epoch+1}/{num_epochs}')
+            for inputs, targets in pbar:
                 inputs, targets = inputs.to(self.device), targets.to(self.device)
                 optimizer.zero_grad()
                 
-                outputs, _ = self.model(inputs, step_n=global_step)
-                loss, L_symp, L_metr = criterion(outputs, targets)
+                outputs = self.model(inputs, step_n=global_step)
+                loss, L_task, L_symp, L_metr, cos_sim = criterion(outputs, targets)
                 
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 optimizer.step()
                 
-                train_loss += loss.item()
-                train_symp += L_symp
-                train_metr += L_metr
+                ep_symp += L_symp
+                ep_metr += L_metr
+                ep_cos += cos_sim
                 global_step += 1
                 
-                progress_bar.set_postfix({'Symp(H)': f'{L_symp:.4f}', 'Metr(S)': f'{L_metr:.4f}'})
+                pbar.set_postfix({'Symp': f'{L_symp:.4f}', 'Metr': f'{L_metr:.4f}', 'CosSim': f'{cos_sim:.4f}'})
             
-            self.history_total.append(train_loss / len(train_loader))
-            self.history_symp.append(train_symp / len(train_loader))
-            self.history_metr.append(train_metr / len(train_loader))
-            
-            logger.info(f"Época {epoch+1} | Loss Total: {self.history_total[-1]:.4f} | Symp: {self.history_symp[-1]:.4f} | Metr: {self.history_metr[-1]:.4f}")
+            batches = len(train_loader)
+            self.h_symp.append(ep_symp / batches)
+            self.h_metr.append(ep_metr / batches)
+            self.h_cos.append(ep_cos / batches)
+            logger.info(f"Época {epoch+1} | Cosine: {self.h_cos[-1]:.4f} (>0.85 pass) | Symp: {self.h_symp[-1]:.4f} | Metr: {self.h_metr[-1]:.4f}")
             
     def plot_diagnostics(self):
-        """Regla 3.3 Visualización Diagnóstica - Competencia H vs S"""
-        plt.figure(figsize=(12, 5))
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
         
-        # Grafica la competencia Metripléctica
-        plt.plot(self.history_symp, label=f'Inercial/Simpléctico ($H$) w={W_SYMP:.3f}', color='blue', alpha=0.8)
-        plt.plot(self.history_metr, label=f'Relajación/Métrico ($S$) w={W_METR:.3f}', color='red', alpha=0.8)
-        plt.title('Competencia Metripléctica en la Función de Pérdida ($H$ vs $S$)')
-        plt.xlabel('Época')
-        plt.ylabel('Magnitud de Componente')
-        plt.legend()
-        plt.grid(True, linestyle='--', alpha=0.5)
+        ax1.plot(self.h_symp, label=f'Simpléctico ($H$) w={W_SYMP:.3f}', color='blue')
+        ax1.plot(self.h_metr, label=f'Métrico ($S$) w={W_METR:.3f}', color='red')
+        ax1.set_title('Regla 3.3 H7: Competencia Dinámica')
+        ax1.legend()
+        ax1.grid(True)
+        
+        ax2.plot(self.h_cos, label='Cosine Similarity (Rendimiento Kaggle)', color='green', linewidth=2)
+        ax2.axhline(y=0.85, color='orange', linestyle='--', label='Kaggle Pass Threshold (> 0.85)')
+        ax2.set_title('The H7 Attention Task - Reconstrucción Holográfica')
+        ax2.legend()
+        ax2.grid(True)
         
         plt.tight_layout()
         path = os.path.join(self.save_dir, 'metriplectic_rnn_diagnostics.png')
         plt.savefig(path)
-        logger.info(f"Diagnóstico guardado en '{path}'")
+        logger.info(f"Gráfico de rendimiento oficial guardado en '{path}'")
         plt.close()
 
 if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logger.info(f"Usando dispositivo: {device}")
+    logger.info(f"Dev: {device}")
     
-    # 1. Simular Firmware Cognitivo H7 (Series discretas de estados ternarios [-1, 0, 1])
-    np.random.seed(42)
-    # Genera 100 secuencias sintéticas oscilatorias entre -1, 0 y 1 para prueba
-    sample_h7_tracks = [np.round(np.sin(np.linspace(0, 4*np.pi, 50)) * np.random.choice([0.5, 1.0])).astype(int).tolist() for _ in range(100)]
+    # Simular El Task Oficial
+    dataset = HolographicDataset(num_samples=2500) # Entrenamiento robusto ficticio
+    loader = DataLoader(dataset, batch_size=64, shuffle=True)
     
-    # 2. Dataset y Dataloader Ternario
-    dataset = TernaryDataset(sample_h7_tracks, max_length=15, stride=2)
-    loader = DataLoader(dataset, batch_size=8, shuffle=True, collate_fn=collate_fn)
+    model = MetriplecticRNN()
+    trainer = MetriplecticTrainer(model, device=device)
     
-    # 3. Inicializar Modelo
-    model = MetriplecticRNN(vocab_size=4, embed_size=32, hidden_size=64, num_layers=1)
-    
-    # 4. Entrenar y Diagnosticar
-    trainer = MetriplecticTrainer(model, device=device, save_dir='./working')
     trainer.train(loader, num_epochs=20, lr=0.005)
     trainer.plot_diagnostics()
